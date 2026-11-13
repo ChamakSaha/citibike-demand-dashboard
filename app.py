@@ -179,9 +179,9 @@ with tab_pred:
         label, cls = demand_level(p, sid)
         note = ("Bike demand = number of trips starting at this station in that hour. "
                 "Predicted by a model trained on Citi Bike trips from January 2024.")
-        if date.month != 1:
-            note += (f" {calendar.month_name[date.month]} is outside the training month, so it is "
-                     "shown at January (winter) levels.")
+        # if date.month != 1:
+        #     note += (f" {calendar.month_name[date.month]} is outside the training month, so it is "
+        #              "shown at January (winter) levels.")
         if date in HOLIDAYS:
             note += " This date is a U.S. holiday."
         st.markdown(f"""
