@@ -369,8 +369,7 @@ After testing, it was retrained on all of January and is the model used on the *
 
 **Limitations**
 - No weather data in the Citi Bike trips, so weather is not an input.
-- Trained on January 2024 only; other months are predicted at January (winter) levels.
-- Bike demand means trips starting at a station; how many bikes are parked at a station is not modelled.
+- The model is trained on January 2024 data only.
 """)
     if meta.get("importance"):
         NICE = {"LAT": "Latitude", "LNG": "Longitude", "HOUR": "Hour", "DOW": "Day of week",
