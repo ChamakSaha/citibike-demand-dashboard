@@ -1,0 +1,82 @@
+{
+  "data": "Citi Bike trip data, January 2024",
+  "files": [
+    "202401-citibike-tripdata_1.csv"
+  ],
+  "n_trips": 604912,
+  "n_stations": 2002,
+  "plan_features": [
+    "STATION_ID",
+    "LAT",
+    "LNG",
+    "HOUR",
+    "DOW",
+    "IS_WEEKEND",
+    "IS_HOLIDAY"
+  ],
+  "plan_test_period": "2024-01-25 to 2024-01-31",
+  "plan_metrics": {
+    "station_hour_mae": 0.5465265384656324,
+    "station_hour_rmse": 1.0918527188199183,
+    "citywide_mae": 1094.146130008196,
+    "citywide_rmse": 1391.706735843806,
+    "citywide_r2": 0.0
+  },
+  "next_features": [
+    "hour",
+    "day_of_week",
+    "is_weekend",
+    "lag_1",
+    "lag_24",
+    "lag_168",
+    "rolling_mean_24"
+  ],
+  "next_metrics": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "r2": 1.0
+  },
+  "next_test_start": "2024-01-27 04:00:00",
+  "next_importance": {
+    "hour": 0.0328,
+    "day_of_week": 0.0079,
+    "is_weekend": 0.0048,
+    "lag_1": 0.6777,
+    "lag_24": 0.1428,
+    "lag_168": 0.0563,
+    "rolling_mean_24": 0.0777
+  },
+  "previous_5b": {
+    "Extra Trees": {
+      "mae": 47.84,
+      "rmse": 69.38,
+      "r2": 0.8842
+    },
+    "Gradient Boosting": {
+      "mae": 70.0,
+      "rmse": 118.9,
+      "r2": 0.6601
+    },
+    "Random Forest": {
+      "mae": 72.74,
+      "rmse": 121.31,
+      "r2": 0.6461
+    },
+    "Neural Network (MLP)": {
+      "mae": 112.96,
+      "rmse": 144.38,
+      "r2": 0.4987
+    },
+    "Linear Regression": {
+      "mae": 158.18,
+      "rmse": 185.11,
+      "r2": 0.1761
+    }
+  },
+  "versions": {
+    "python": "3.13.18",
+    "sklearn": "1.6.1",
+    "numpy": "2.4.6",
+    "pandas": "2.2.3"
+  }
+}
