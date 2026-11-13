@@ -1,7 +1,7 @@
 streamlit>=1.50
 altair>=5
-pydeck>=0.8
 pandas>=2.0
 numpy==2.4.6
 scikit-learn==1.6.1
+xgboost==3.4.1
 joblib>=1.3

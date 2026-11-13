@@ -3,79 +3,82 @@
   "files": [
     "202401-citibike-tripdata_1.csv"
   ],
-  "n_trips": 604912,
-  "n_stations": 2002,
-  "plan_features": [
-    "STATION_ID",
+  "n_trips": 369214,
+  "n_stations": 1823,
+  "n_train_rows": 306264,
+  "n_test_rows": 306264,
+  "split": {
+    "train": "01 Jan \u2013 07 Jan 2024",
+    "test": "08 Jan \u2013 14 Jan 2024"
+  },
+  "dates": [
+    "2024-01-01",
+    "2024-01-02",
+    "2024-01-03",
+    "2024-01-04",
+    "2024-01-05",
+    "2024-01-06",
+    "2024-01-07",
+    "2024-01-08",
+    "2024-01-09",
+    "2024-01-10",
+    "2024-01-11",
+    "2024-01-12",
+    "2024-01-13",
+    "2024-01-14"
+  ],
+  "features": [
     "LAT",
     "LNG",
     "HOUR",
     "DOW",
     "IS_WEEKEND",
-    "IS_HOLIDAY"
+    "IS_HOLIDAY",
+    "ST_MEAN",
+    "ST_HOUR_MEAN",
+    "ST_DAYTYPE_HOUR_MEAN",
+    "ST_DOW_HOUR_MEAN"
   ],
-  "plan_test_period": "2024-01-25 to 2024-01-31",
-  "plan_metrics": {
-    "station_hour_mae": 0.5465265384656324,
-    "station_hour_rmse": 1.0918527188199183,
-    "citywide_mae": 1094.146130008196,
-    "citywide_rmse": 1391.706735843806,
-    "citywide_r2": 0.0
-  },
-  "next_features": [
-    "hour",
-    "day_of_week",
-    "is_weekend",
-    "lag_1",
-    "lag_24",
-    "lag_168",
-    "rolling_mean_24"
-  ],
-  "next_metrics": {
-    "mae": 0.0,
-    "rmse": 0.0,
-    "r2": 1.0
-  },
-  "next_test_start": "2024-01-27 04:00:00",
-  "next_importance": {
-    "hour": 0.0328,
-    "day_of_week": 0.0079,
-    "is_weekend": 0.0048,
-    "lag_1": 0.6777,
-    "lag_24": 0.1428,
-    "lag_168": 0.0563,
-    "rolling_mean_24": 0.0777
-  },
-  "previous_5b": {
-    "Extra Trees": {
-      "mae": 47.84,
-      "rmse": 69.38,
-      "r2": 0.8842
+  "models": [
+    {
+      "model": "Random Forest",
+      "mae": 0.5633847040791182,
+      "rmse": 1.0552611367499434,
+      "r2": 0.4429895292792677,
+      "train_seconds": 22.141538215999958
     },
-    "Gradient Boosting": {
-      "mae": 70.0,
-      "rmse": 118.9,
-      "r2": 0.6601
+    {
+      "model": "Gradient Boosting",
+      "mae": 0.5587912041646153,
+      "rmse": 1.0556399927199596,
+      "r2": 0.44258950578581013,
+      "train_seconds": 25.488094435999983
     },
-    "Random Forest": {
-      "mae": 72.74,
-      "rmse": 121.31,
-      "r2": 0.6461
-    },
-    "Neural Network (MLP)": {
-      "mae": 112.96,
-      "rmse": 144.38,
-      "r2": 0.4987
-    },
-    "Linear Regression": {
-      "mae": 158.18,
-      "rmse": 185.11,
-      "r2": 0.1761
+    {
+      "model": "XGBoost",
+      "mae": 0.5570579767227173,
+      "rmse": 1.060298321508561,
+      "r2": 0.4376591444015503,
+      "train_seconds": 23.125768180000023
     }
+  ],
+  "best_model": "Random Forest",
+  "importance": {
+    "ST_HOUR_MEAN": 0.20046562987561034,
+    "ST_MEAN": 0.1047502795677245,
+    "HOUR": 0.07133341592457743,
+    "ST_DAYTYPE_HOUR_MEAN": 0.031175249241858327,
+    "ST_DOW_HOUR_MEAN": 0.028083240912634328,
+    "IS_WEEKEND": 0.002086524687787805,
+    "LNG": 0.001647085448308457,
+    "LAT": 0.0007534202985206943,
+    "IS_HOLIDAY": 0.0,
+    "DOW": 0.0
   },
   "versions": {
     "python": "3.13.18",
     "sklearn": "1.6.1",
+    "xgboost": "3.4.1",
     "numpy": "2.4.6",
     "pandas": "2.2.3"
   }

@@ -1,5 +1,5 @@
 """
-NYC Citi Bike Demand Dashboard (Streamlit)
+NYC Hourly Bike Demand Dashboard (Streamlit)
 Chamak Saha
 
 Run locally:  streamlit run app.py
@@ -8,504 +8,385 @@ Needs the artifacts/ folder created by the Colab training notebook.
 import calendar
 import datetime as dt
 import json
+import warnings
 from pathlib import Path
 
 import altair as alt
 import joblib
 import numpy as np
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
 from pandas.tseries.holiday import USFederalHolidayCalendar
 
-st.set_page_config(page_title="NYC Citi Bike Demand Dashboard", page_icon="🚲", layout="wide")
+warnings.filterwarnings("ignore")
+st.set_page_config(page_title="NYC Hourly Bike Demand Dashboard", page_icon="🚲", layout="centered")
 
 ART = Path(__file__).parent / "artifacts"
-BLUE, ORANGE, GRAY = "#2a78d6", "#eb6834", "#8a8984"
-SEQ = ["#cde2fb", "#86b6ef", "#2a78d6", "#184f95", "#0d366b"]   # light → dark blue
+INK, MUTED, BLUE, ORANGE, GRAY = "#111111", "#6b6b6b", "#2a78d6", "#eb6834", "#a3a3a3"
+SEQ = ["#cde2fb", "#86b6ef", "#2a78d6", "#184f95", "#0d366b"]
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 ALL = "ALL"
-NEEDED = ["plan_model.joblib", "next_model.joblib", "metadata.json", "stations.csv",
-          "city_hourly.csv", "city_detail.csv.gz", "station_dow_hour.csv.gz",
-          "station_daily.csv.gz"]
 
-missing = [f for f in NEEDED if not (ART / f).exists()]
-if missing:
-    st.error(f"Missing files in `artifacts/`: {', '.join(missing)}. "
-             "Run the Colab training notebook and upload its output.")
+st.markdown("""
+<style>
+.stApp {background:#fafafa;}
+.block-container {padding-top:1.4rem; max-width:860px;}
+h1,h2,h3 {letter-spacing:-.01em;}
+/* pill-style tabs (works for old and new Streamlit tab markup) */
+[role="tablist"] {display:flex !important; gap:8px; width:100%; border-bottom:none !important;}
+[role="tablist"] [role="tab"] {flex:1 1 0; display:flex; justify-content:center; border-radius:999px;
+  padding:10px 0 !important; color:#8a8a8a; background:transparent; border:none !important;}
+[role="tablist"] [role="tab"] p {font-weight:600; font-size:1rem;}
+[role="tablist"] [role="tab"][aria-selected="true"] {background:#efefef; color:#111;}
+.react-aria-SelectionIndicator, [data-baseweb="tab-highlight"], [data-baseweb="tab-border"] {display:none !important;}
+/* form without box, rounded inputs */
+[data-testid="stForm"] {border:none !important; padding:0 !important;}
+div[data-baseweb="select"] > div, [data-testid="stDateInput"] div[data-baseweb="input"] {
+  border-radius:999px !important; background:#fff !important; border:1px solid #dcdcdc !important;}
+[data-testid="stDateInput"] input {background:#fff !important;}
+/* black pill button */
+[data-testid="stFormSubmitButton"] button, .stButton > button {background:#111 !important; color:#fff !important;
+  border-radius:999px !important; border:none !important; padding:.7rem 0 !important; font-weight:600;}
+[data-testid="stFormSubmitButton"] button:hover, .stButton > button:hover {background:#333 !important;}
+[data-testid="stFormSubmitButton"] button p {color:#fff !important; font-weight:600;}
+/* cards */
+.card {background:#fff; border:1px solid #e6e6e6; border-radius:16px; padding:18px 20px; margin:10px 0;}
+.card .label {color:#555; font-weight:600; font-size:.95rem;}
+.card .big {font-size:2.3rem; font-weight:700; color:#111; line-height:1.2; margin-top:6px;}
+.card .unit {font-size:1.25rem; font-weight:400; color:#666; margin-left:6px;}
+.card .meta {color:#666; font-size:.85rem; margin:4px 0 10px 0;}
+.card .note {color:#666; font-size:.9rem; margin-top:10px;}
+.badge {display:inline-block; padding:3px 12px; border-radius:999px; font-size:.85rem; font-weight:600;}
+.b-high {background:#fde3d8; color:#9a3412;} .b-med {background:#fdf1cc; color:#854d0e;}
+.b-low {background:#dcf3e4; color:#166534;}
+.kpi {background:#fff; border:1px solid #e6e6e6; border-radius:14px; padding:12px 14px;}
+.kpi .k {color:#666; font-size:.8rem;} .kpi .v {font-size:1.35rem; font-weight:700; color:#111;}
+.sub {color:#666; margin-top:-6px;}
+[data-testid="stVerticalBlockBorderWrapper"] {background:#fff; border-radius:16px;}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+
+NEEDED = ["model.joblib", "metadata.json", "stations.csv", "city_detail.csv.gz",
+          "station_dow_hour.csv.gz", "station_daily.csv.gz", "profile.csv.gz"]
+_missing = [f for f in NEEDED if not (ART / f).exists()]
+if _missing:
+    st.error(f"Missing files in `artifacts/`: {', '.join(_missing)}. Run the Colab notebook first.")
     st.stop()
 
-
-# ----------------------------------------------------------------------------
-# Loading (cached once per server and shared by all users)
-# ----------------------------------------------------------------------------
-@st.cache_resource(show_spinner="Loading models…")
-def load_models():
-    return joblib.load(ART / "plan_model.joblib"), joblib.load(ART / "next_model.joblib")
+# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner="Loading model…")
+def load_model():
+    return joblib.load(ART / "model.joblib")
 
 
 @st.cache_data(show_spinner="Loading data…")
 def load_data():
     meta = json.loads((ART / "metadata.json").read_text())
     stations = pd.read_csv(ART / "stations.csv", dtype={"STATION_ID": str})
-    city = pd.read_csv(ART / "city_hourly.csv", parse_dates=["hourly_timestamp"])
     detail = pd.read_csv(ART / "city_detail.csv.gz", parse_dates=["HOUR_TS"])
     sdh = pd.read_csv(ART / "station_dow_hour.csv.gz", dtype={"STATION_ID": str})
-    sdaily = pd.read_csv(ART / "station_daily.csv.gz", dtype={"STATION_ID": str},
-                         parse_dates=["DATE"])
-    return meta, stations, city, detail, sdh, sdaily
+    sdaily = pd.read_csv(ART / "station_daily.csv.gz", dtype={"STATION_ID": str}, parse_dates=["DATE"])
+    profile = pd.read_csv(ART / "profile.csv.gz", dtype={"STATION_ID": str})
+    return meta, stations, detail, sdh, sdaily, profile
 
 
-plan_model, next_model = load_models()
-meta, stations, city, detail, sdh, sdaily = load_data()
+model = load_model()
+meta, stations, detail, sdh, sdaily, profile = load_data()
 NAME = dict(zip(stations["STATION_ID"], stations["NAME"]))
-HOLIDAYS = set(USFederalHolidayCalendar().holidays("2020-01-01", "2030-12-31").date)
-# Number of Mondays, Tuesdays, … in January 2024 (to turn monthly totals into daily averages)
-JAN_DOW_COUNT = pd.Series(pd.date_range("2024-01-01", "2024-01-31").dayofweek).value_counts().to_dict()
+HOLIDAYS = {d.date() for d in USFederalHolidayCalendar().holidays("2020-01-01", "2030-12-31")}
+DATA_DATES = pd.to_datetime(meta.get("dates") or pd.date_range("2024-01-01", "2024-01-31"))
+JAN_DOW_COUNT = {i: max(1, int((DATA_DATES.dayofweek == i).sum())) for i in range(7)}
+STATION_OPTS = stations.sort_values("NAME")["STATION_ID"].tolist()
+TOP_STATION = stations.sort_values("TRIPS", ascending=False)["STATION_ID"].iloc[0]
 
 
-def loc_label(sid):
-    return "🗽 All NYC (citywide)" if sid == ALL else f"{NAME.get(sid, sid)}"
-
-
-def time_features(ts: pd.Series) -> pd.DataFrame:
+def time_features(ts):
     ts = pd.to_datetime(ts)
-    return pd.DataFrame({
-        "HOUR": ts.dt.hour,
-        "DOW": ts.dt.dayofweek,
-        "IS_WEEKEND": (ts.dt.dayofweek >= 5).astype(int),
-        "IS_HOLIDAY": ts.dt.date.isin(HOLIDAYS).astype(int),
-    }, index=ts.index)
+    return pd.DataFrame({"HOUR": ts.dt.hour, "DOW": ts.dt.dayofweek,
+                         "IS_WEEKEND": (ts.dt.dayofweek >= 5).astype(int),
+                         "IS_HOLIDAY": [int(t.date() in HOLIDAYS) for t in ts]}, index=ts.index)
 
 
-@st.cache_data(max_entries=128, show_spinner="Predicting…")
-def predict_day(date_iso: str) -> pd.DataFrame:
-    """Predicted pickups for every station and every hour of one date (cached per date)."""
-    hrs = pd.DataFrame({"HOUR_TS": pd.date_range(pd.Timestamp(date_iso), periods=24, freq="h")})
-    grid = stations[["STATION_ID", "LAT", "LNG"]].merge(hrs, how="cross")
-    grid = grid.join(time_features(grid["HOUR_TS"]))
-    grid["PRED"] = np.clip(plan_model.predict(grid[meta["plan_features"]]), 0, None)
-    return grid[["STATION_ID", "HOUR", "PRED"]]
+@st.cache_data(max_entries=256, show_spinner=False)
+def station_day(sid: str, date_iso: str) -> np.ndarray:
+    """Predicted bike demand (trips) for one station for each hour of one date."""
+    s = stations[stations["STATION_ID"] == sid].iloc[0]
+    hrs = pd.Series(pd.date_range(pd.Timestamp(date_iso), periods=24, freq="h"))
+    X = pd.DataFrame({"STATION_ID": sid, "LAT": s["LAT"], "LNG": s["LNG"]}, index=hrs.index)
+    X = X.join(time_features(hrs))
+    # add the station's historical demand pattern for that weekday and hour
+    X = X.merge(profile, on=["STATION_ID", "DOW", "HOUR"], how="left").fillna(0)
+    return np.clip(model.predict(X[meta["features"]]), 0, None)
 
 
-def typical_profile(sid, dow):
-    """Actual average pickups per hour on that weekday in January 2024."""
-    s = sdh if sid == ALL else sdh[sdh["STATION_ID"] == sid]
-    prof = s[s["DOW"] == dow].groupby("HOUR")["TRIPS"].sum().reindex(range(24), fill_value=0)
-    return prof / JAN_DOW_COUNT[dow]
+def typical(sid, dow):
+    s = sdh[(sdh["STATION_ID"] == sid) & (sdh["DOW"] == dow)]
+    return (s.groupby("HOUR")["TRIPS"].sum().reindex(range(24), fill_value=0) / JAN_DOW_COUNT[dow]).to_numpy()
 
 
-def fmt_hour(h):
-    return f"{h:02d}:00"
+def demand_level(p, sid):
+    """Compare with this station's own busiest hours in January."""
+    s = sdh[sdh["STATION_ID"] == sid]
+    hourly_avg = (s.groupby(["DOW", "HOUR"])["TRIPS"].sum() /
+                  s.groupby(["DOW", "HOUR"])["DOW"].first().map(JAN_DOW_COUNT))
+    hi, lo = np.quantile(hourly_avg, 0.75), np.quantile(hourly_avg, 0.40)
+    if p >= hi:
+        return "High demand", "b-high"
+    if p >= lo:
+        return "Medium demand", "b-med"
+    return "Low demand", "b-low"
 
 
-# ----------------------------------------------------------------------------
-# Header
-# ----------------------------------------------------------------------------
-st.title("🚲 NYC Citi Bike Demand Dashboard")
-st.caption(f"Bike pickups per hour at Citi Bike stations, learned from "
-           f"{meta['n_trips']:,} trips at {meta['n_stations']:,} stations ({meta['data']}).")
+# ---------------------------------------------------------------------------
+st.markdown("## 🚲 NYC Hourly Bike Demand Dashboard")
+st.markdown("<div class='sub'>Explore Citi Bike demand patterns across New York City and get the "
+            "predicted bike demand for any station, date and hour.</div>",
+            unsafe_allow_html=True)
+st.write("")
 
-tab_pred, tab_explore, tab_next, tab_batch, tab_model, tab_help = st.tabs(
-    ["🔮 Predict demand", "📊 Explore patterns", "⏱️ Next-hour forecast (5B model)",
-     "📁 Batch prediction", "🧠 About the models", "❓ How to use"])
+tab_pred, tab_exp, tab_about = st.tabs(["Predict Demand", "Explore Patterns", "About the Models"])
 
-# ----------------------------------------------------------------------------
-# TAB 1: Predict demand for a date, hour and location
-# ----------------------------------------------------------------------------
+# ======================= PREDICT =======================
 with tab_pred:
-    st.subheader("Choose a date, time and location")
-    loc_options = [ALL] + stations.sort_values("NAME")["STATION_ID"].tolist()
-    c1, c2, c3 = st.columns([1, 1, 2])
-    date = c1.date_input("Date", value=dt.date(2024, 1, 17), format="YYYY-MM-DD")
-    hour = c2.selectbox("Hour", list(range(24)), index=8, format_func=fmt_hour)
-    loc = c3.selectbox("Location (station)", loc_options, format_func=loc_label,
-                       help="Type to search, e.g. 'Broadway' or '8 Ave'.")
-    st.caption("Weather is not in the Citi Bike trip data, so predictions reflect typical "
-               "January conditions for that weekday, hour and station.")
+    st.markdown("### Predict Hourly Bike Demand")
+    st.markdown("<div class='sub'>Select a station, date, and time to estimate bike demand.</div>",
+                unsafe_allow_html=True)
+    st.write("")
+    with st.form("predict"):
+        sid = st.selectbox("Bike Station", STATION_OPTS, index=STATION_OPTS.index(TOP_STATION),
+                           format_func=lambda s: NAME[s])
+        c1, c2 = st.columns(2)
+        today = dt.date.today()
+        default_date = today if dt.date(2024, 1, 1) <= today <= dt.date(2030, 12, 31) else dt.date(2024, 1, 17)
+        date = c1.date_input("Select Date", value=default_date, min_value=dt.date(2024, 1, 1),
+                             max_value=dt.date(2030, 12, 31), format="MM/DD/YYYY")
+        hour = c2.selectbox("Time", list(range(24)), index=17,
+                            format_func=lambda h: dt.time(h).strftime("%I:%M %p").lstrip("0"))
+        st.caption("🌦️ Weather: not available in the Citi Bike trip data, so predictions assume "
+                   "typical conditions.")
+        go = st.form_submit_button("✨  Predict Bike Demand", width="stretch")
 
-    day_pred = predict_day(date.isoformat())
-    dow = date.weekday()
-    if loc == ALL:
-        prof = day_pred.groupby("HOUR")["PRED"].sum()
+    if go:
+        st.session_state["pred"] = (sid, date, hour)
+
+    if "pred" in st.session_state:
+        sid, date, hour = st.session_state["pred"]
+        prof = station_day(sid, date.isoformat())
+        p = float(prof[hour])
+        label, cls = demand_level(p, sid)
+        note = ("Bike demand = number of trips starting at this station in that hour. "
+                "Predicted by a model trained on Citi Bike trips from January 2024.")
+        if date.month != 1:
+            note += (f" {calendar.month_name[date.month]} is outside the training month, so it is "
+                     "shown at January (winter) levels.")
+        if date in HOLIDAYS:
+            note += " This date is a U.S. holiday."
+        st.markdown(f"""
+<div class='card'>
+  <div class='label'>Estimated bike demand</div>
+  <div class='big'>{p:,.0f}<span class='unit'>trips / hour</span></div>
+  <div class='meta'>{NAME[sid]} · {date:%Y-%m-%d} · {hour:02d}:00</div>
+  <span class='badge {cls}'>{label}</span>
+  <div class='note'>{note}</div>
+</div>""", unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown("### Hourly Demand Trend")
+        st.markdown(f"<div class='sub'>Predicted trips for every hour of {date:%A, %d %b %Y} at "
+                    f"{NAME[sid]}, compared with the January average for {DAYS[date.weekday()]}s.</div>",
+                    unsafe_allow_html=True)
+        dom = ["Predicted", f"January average ({DAYS[date.weekday()]})"]
+        df = pd.DataFrame({"Hour": list(range(24)) * 2,
+                           "Trips": list(prof) + list(typical(sid, date.weekday())),
+                           "Series": [dom[0]] * 24 + [dom[1]] * 24})
+        base = alt.Chart(df).encode(
+            x=alt.X("Hour:Q", scale=alt.Scale(domain=[0, 23]), axis=alt.Axis(tickMinStep=2, grid=False)),
+            y=alt.Y("Trips:Q", title="Trips per hour"),
+            color=alt.Color("Series:N", title=None, legend=alt.Legend(orient="top", labelLimit=300),
+                            scale=alt.Scale(domain=dom, range=[INK, GRAY])),
+            strokeDash=alt.StrokeDash("Series:N", legend=None,
+                                      scale=alt.Scale(domain=dom, range=[[1, 0], [4, 4]])),
+            tooltip=["Series", "Hour", alt.Tooltip("Trips:Q", format=",.1f")])
+        area = alt.Chart(df[df["Series"] == dom[0]]).mark_area(color=INK, opacity=.06).encode(
+            x="Hour:Q", y="Trips:Q")
+        dot = alt.Chart(pd.DataFrame({"Hour": [hour], "Trips": [p]})).mark_circle(
+            size=170, color=ORANGE).encode(x="Hour:Q", y="Trips:Q")
+        st.altair_chart((area + base.mark_line(strokeWidth=2.5) + dot)
+                        .properties(height=280).configure_view(stroke=None), width="stretch")
+        best = int(np.argmax(prof))
+        quiet = 6 + int(np.argmin(prof[6:23]))
+        st.caption(f"Peak hour: **{best:02d}:00** ({prof[best]:.0f} trips) · "
+                   f"Quietest daytime hour: **{quiet:02d}:00** ({prof[quiet]:.0f} trips)")
     else:
-        prof = day_pred[day_pred["STATION_ID"] == loc].set_index("HOUR")["PRED"]
-    typical = typical_profile(loc, dow)
-    p_hour = float(prof.loc[hour])
+        st.info("Choose a station, date and time, then press **Predict Bike Demand**.")
 
-    notes = []
-    if date.month != 1:
-        notes.append(f"The models learned from **January 2024** (winter). For "
-                     f"{calendar.month_name[date.month]}, they show winter-level demand; "
-                     "warmer months usually have many more trips.")
-    if date in HOLIDAYS:
-        notes.append("This date is a U.S. federal holiday: commuting peaks are usually smaller.")
-    for n in notes:
-        st.info(n)
-
-    st.divider()
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"Predicted pickups at {fmt_hour(hour)}", f"{p_hour:,.0f}" if p_hour >= 10 else f"{p_hour:.1f}",
-              delta=f"{p_hour - typical.loc[hour]:+,.1f} vs typical January {DAYS[dow]}",
-              delta_color="off")
-    m2.metric("Predicted pickups, whole day", f"{prof.sum():,.0f}")
-    m3.metric("Busiest hour that day", fmt_hour(int(prof.idxmax())))
-    m4.metric("Quietest daytime hour (6–22)", fmt_hour(int(prof.loc[6:22].idxmin())))
-    st.write(f"**{loc_label(loc)}**, {DAYS[dow]} {date:%d %b %Y}, {fmt_hour(hour)}–{fmt_hour((hour + 1) % 24)}.")
-
-    # 24-hour profile: prediction vs actual January average
-    prof_df = pd.DataFrame({
-        "Hour": list(range(24)) * 2,
-        "Pickups": list(prof.values) + list(typical.values),
-        "Series": ["Predicted for this date"] * 24 + [f"Actual average, January {DAYS[dow]}s"] * 24,
-    })
-    series_dom = ["Predicted for this date", f"Actual average, January {DAYS[dow]}s"]
-    color = alt.Color("Series:N", title=None, legend=alt.Legend(orient="top", labelLimit=320),
-                      scale=alt.Scale(domain=series_dom, range=[BLUE, GRAY]))
-    lines = alt.Chart(prof_df).mark_line(strokeWidth=2).encode(
-        x=alt.X("Hour:Q", scale=alt.Scale(domain=[0, 23]), axis=alt.Axis(tickMinStep=1)),
-        y=alt.Y("Pickups:Q", title="Pickups per hour"),
-        color=color,
-        strokeDash=alt.StrokeDash("Series:N", legend=None,
-                                  scale=alt.Scale(domain=series_dom, range=[[1, 0], [4, 4]])),
-        tooltip=["Series", "Hour", alt.Tooltip("Pickups:Q", format=",.1f")])
-    sel = alt.Chart(pd.DataFrame({"Hour": [hour], "Pickups": [p_hour]})).mark_circle(
-        size=160, color=ORANGE).encode(x="Hour:Q", y="Pickups:Q",
-                                       tooltip=[alt.Tooltip("Pickups:Q", format=",.1f")])
-    st.markdown("**Predicted demand across the day** (orange = your hour)")
-    st.altair_chart((lines + sel).properties(height=300), width="stretch")
-
-    # Map of every station at the chosen hour
-    st.markdown(f"**Predicted pickups at every station, {fmt_hour(hour)}** "
-                "(bigger, darker circle = more demand; hover for details)")
-    hour_df = day_pred[day_pred["HOUR"] == hour].merge(stations[["STATION_ID", "NAME", "LAT", "LNG"]],
-                                                       on="STATION_ID")
-    top = max(hour_df["PRED"].quantile(0.99), 1e-6)
-    level = np.clip(hour_df["PRED"] / top, 0, 1)
-    rgb = np.array([[205, 226, 251], [134, 182, 239], [42, 120, 214], [24, 79, 149], [13, 54, 107]])
-    idx = np.minimum((level * 4.999).astype(int), 4)
-    hour_df["COLOR"] = [[235, 104, 52, 255] if sid == loc else list(map(int, rgb[i])) + [200]
-                        for sid, i in zip(hour_df["STATION_ID"], idx)]
-    hour_df["RADIUS"] = 25 + 140 * np.sqrt(level)
-    hour_df.loc[hour_df["STATION_ID"] == loc, "RADIUS"] = 200
-    hour_df["LABEL"] = hour_df["PRED"].map(lambda v: f"{v:.1f}")
-    if loc != ALL:
-        center = stations.loc[stations["STATION_ID"] == loc, ["LAT", "LNG"]].iloc[0]
-        view = pdk.ViewState(latitude=center["LAT"], longitude=center["LNG"], zoom=13.5)
-    else:
-        view = pdk.ViewState(latitude=40.735, longitude=-73.97, zoom=11.2)
-    st.pydeck_chart(pdk.Deck(
-        layers=[pdk.Layer("ScatterplotLayer", data=hour_df,
-                          get_position="[LNG, LAT]", get_fill_color="COLOR",
-                          get_radius="RADIUS", pickable=True,
-                          radius_min_pixels=2, radius_max_pixels=18)],
-        initial_view_state=view, map_style="light",
-        tooltip={"html": "<b>{NAME}</b><br/>Predicted pickups: {LABEL}"}), height=460)
-
-    with st.expander(f"Top 15 stations at {fmt_hour(hour)}"):
-        t15 = hour_df.nlargest(15, "PRED")[["NAME", "PRED"]].rename(
-            columns={"NAME": "Station", "PRED": "Predicted pickups"})
-        st.dataframe(t15.style.format({"Predicted pickups": "{:.1f}"}), hide_index=True,
-                     width="stretch")
-
-# ----------------------------------------------------------------------------
-# TAB 2: Explore historical patterns
-# ----------------------------------------------------------------------------
-with tab_explore:
-    st.subheader("Explore actual demand, January 2024")
-    f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
-    e_loc = f1.selectbox("Location", loc_options, format_func=loc_label, key="e_loc")
+# ======================= EXPLORE =======================
+with tab_exp:
+    st.markdown("### Explore Demand Patterns")
+    st.markdown("<div class='sub'>Actual Citi Bike trips in January 2024.</div>", unsafe_allow_html=True)
+    st.write("")
+    f1, f2 = st.columns(2)
+    e_loc = f1.selectbox("Station", [ALL] + STATION_OPTS, key="e_loc",
+                         format_func=lambda s: "All NYC stations" if s == ALL else NAME[s])
+    daytype = f2.selectbox("Days", ["All days", "Weekdays", "Weekends"])
     citywide = e_loc == ALL
-    rider = f2.selectbox("Rider type", ["All", "member", "casual"], disabled=not citywide)
-    bike = f3.selectbox("Bike type", ["All", "classic_bike", "electric_bike"], disabled=not citywide,
+    f3, f4 = st.columns(2)
+    rider = f3.selectbox("Rider type", ["All", "member", "casual"], disabled=not citywide,
+                         format_func=str.capitalize)
+    bike = f4.selectbox("Bike type", ["All", "classic_bike", "electric_bike"], disabled=not citywide,
                         format_func=lambda b: b.replace("_", " ").capitalize())
-    daytype = f4.selectbox("Days", ["All days", "Weekdays", "Weekends"])
-    if not citywide:
-        st.caption("Rider and bike type filters apply to the citywide view.")
 
     if citywide:
-        d = detail.copy()
+        d = detail
         if rider != "All":
             d = d[d["MEMBER"] == rider]
         if bike != "All":
             d = d[d["BIKE"] == bike]
         hourly = d.groupby("HOUR_TS")["TRIPS"].sum().reindex(
-            pd.date_range("2024-01-01", periods=744, freq="h"), fill_value=0)
-        hourly.index.name = "HOUR_TS"
-        hdf = hourly.reset_index()
-        hdf["DATE"] = hdf["HOUR_TS"].dt.normalize()
-        hdf["DOW"] = hdf["HOUR_TS"].dt.dayofweek
-        hdf["HOUR"] = hdf["HOUR_TS"].dt.hour
-        daily = hdf.groupby("DATE")["TRIPS"].sum().reset_index()
-        dow_hour = hdf.groupby(["DOW", "HOUR"])["TRIPS"].sum().reset_index()
+            pd.date_range(DATA_DATES.min(), DATA_DATES.max() + pd.Timedelta(hours=23), freq="h"), fill_value=0)
+        h = pd.DataFrame({"TS": hourly.index, "TRIPS": hourly.to_numpy()})
+        h["DATE"], h["DOW"], h["HOUR"] = h["TS"].dt.normalize(), h["TS"].dt.dayofweek, h["TS"].dt.hour
+        daily = h.groupby("DATE", as_index=False)["TRIPS"].sum()
+        dh = h.groupby(["DOW", "HOUR"], as_index=False)["TRIPS"].sum()
     else:
-        daily = sdaily[sdaily["STATION_ID"] == e_loc].groupby("DATE")["TRIPS"].sum().reindex(
-            pd.date_range("2024-01-01", "2024-01-31"), fill_value=0).rename_axis("DATE").reset_index()
-        dow_hour = sdh[sdh["STATION_ID"] == e_loc][["DOW", "HOUR", "TRIPS"]]
+        s = sdaily[sdaily["STATION_ID"] == e_loc].groupby("DATE")["TRIPS"].sum().reindex(
+            DATA_DATES, fill_value=0)
+        daily = pd.DataFrame({"DATE": s.index, "TRIPS": s.to_numpy()})
         full = pd.MultiIndex.from_product([range(7), range(24)], names=["DOW", "HOUR"])
-        dow_hour = dow_hour.set_index(["DOW", "HOUR"])["TRIPS"].reindex(full, fill_value=0).reset_index()
+        dh = (sdh[sdh["STATION_ID"] == e_loc].set_index(["DOW", "HOUR"])["TRIPS"]
+              .reindex(full, fill_value=0).reset_index())
+    keep = {"Weekdays": range(5), "Weekends": range(5, 7)}.get(daytype, range(7))
+    daily = daily[[t.weekday() in keep for t in daily["DATE"]]]
+    dh = dh[dh["DOW"].isin(list(keep))].copy()
+    dh["AVG"] = dh["TRIPS"] / dh["DOW"].map(JAN_DOW_COUNT)
+    dh["Day"] = dh["DOW"].map(lambda i: DAYS[int(i)][:3])
+    byh = dh.groupby("HOUR")["AVG"].mean()
 
-    wkend = {"Weekdays": [0, 1, 2, 3, 4], "Weekends": [5, 6]}.get(daytype, list(range(7)))
-    daily = daily[daily["DATE"].dt.dayofweek.isin(wkend)]
-    dow_hour = dow_hour[dow_hour["DOW"].isin(wkend)].copy()
-    dow_hour["AVG"] = dow_hour["TRIPS"] / dow_hour["DOW"].map(JAN_DOW_COUNT)
-    dow_hour["Day"] = dow_hour["DOW"].map(lambda i: DAYS[i])
+    k = st.columns(3)
+    for col, (lab, val) in zip(k, [("Total trips", f"{int(daily['TRIPS'].sum()):,}"),
+                                   ("Average per day", f"{daily['TRIPS'].mean():,.0f}"),
+                                   ("Peak hour", f"{int(byh.idxmax()):02d}:00")]):
+        col.markdown(f"<div class='kpi'><div class='k'>{lab}</div><div class='v'>{val}</div></div>",
+                     unsafe_allow_html=True)
+    st.write("")
 
-    total = int(daily["TRIPS"].sum())
-    by_hour = dow_hour.groupby("HOUR")["AVG"].mean()
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total trips (selection)", f"{total:,}")
-    k2.metric("Average trips per day", f"{daily['TRIPS'].mean():,.0f}" if len(daily) else "–")
-    k3.metric("Peak hour", fmt_hour(int(by_hour.idxmax())) if by_hour.sum() else "–")
+    with st.container(border=True):
+        st.markdown("**Average trips per hour**")
+        wk = dh.assign(Type=np.where(dh["DOW"] >= 5, "Weekend", "Weekday")).groupby(
+            ["Type", "HOUR"], as_index=False)["AVG"].mean()
+        st.altair_chart(alt.Chart(wk).mark_line(strokeWidth=2.5).encode(
+            x=alt.X("HOUR:Q", title="Hour", scale=alt.Scale(domain=[0, 23])),
+            y=alt.Y("AVG:Q", title="Trips per hour"),
+            color=alt.Color("Type:N", title=None, legend=alt.Legend(orient="top"),
+                            scale=alt.Scale(domain=["Weekday", "Weekend"], range=[BLUE, ORANGE])),
+            tooltip=["Type", "HOUR", alt.Tooltip("AVG:Q", format=",.1f")]).properties(height=240),
+            width="stretch")
+    with st.container(border=True):
+        st.markdown("**Trips per day in January**")
+        st.altair_chart(alt.Chart(daily).mark_bar(color=BLUE, cornerRadiusTopLeft=3,
+                                                  cornerRadiusTopRight=3).encode(
+            x=alt.X("DATE:T", title=None, axis=alt.Axis(format="%d %b")),
+            y=alt.Y("TRIPS:Q", title="Trips"),
+            tooltip=[alt.Tooltip("DATE:T", format="%a %d %b"), alt.Tooltip("TRIPS:Q", format=",")])
+            .properties(height=220), width="stretch")
+    with st.container(border=True):
+        st.markdown("**When is demand highest?** (darker = busier)")
+        st.altair_chart(alt.Chart(dh).mark_rect(stroke="white", strokeWidth=1, cornerRadius=2).encode(
+            x=alt.X("HOUR:O", title="Hour", axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("Day:N", sort=[d[:3] for d in DAYS], title=None),
+            color=alt.Color("AVG:Q", title="Trips/h", scale=alt.Scale(range=SEQ)),
+            tooltip=["Day", "HOUR", alt.Tooltip("AVG:Q", format=",.1f")]).properties(height=210),
+            width="stretch")
     if citywide:
-        mshare = detail.loc[detail["MEMBER"] == "member", "TRIPS"].sum() / detail["TRIPS"].sum()
-        k4.metric("Trips by members (all January)", f"{mshare:.0%}")
-    else:
-        rank = int((stations["TRIPS"] > stations.loc[stations["STATION_ID"] == e_loc, "TRIPS"].iloc[0]).sum()) + 1
-        k4.metric("Station rank by trips", f"#{rank} of {len(stations):,}")
+        with st.container(border=True):
+            st.markdown("**10 busiest stations**")
+            st.altair_chart(alt.Chart(stations.nlargest(10, "TRIPS")).mark_bar(
+                color=BLUE, cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
+                y=alt.Y("NAME:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
+                x=alt.X("TRIPS:Q", title="Trips in January"),
+                tooltip=["NAME", alt.Tooltip("TRIPS:Q", format=",")]).properties(height=300),
+                width="stretch")
 
-    a1, a2 = st.columns(2)
-    a1.markdown("**Trips per day across January**")
-    a1.altair_chart(
-        alt.Chart(daily).mark_line(color=BLUE, strokeWidth=2,
-                                   point=alt.OverlayMarkDef(color=BLUE, size=40))
-        .encode(x=alt.X("DATE:T", title=None, axis=alt.Axis(format="%d %b")),
-                y=alt.Y("TRIPS:Q", title="Trips"),
-                tooltip=[alt.Tooltip("DATE:T", format="%a %d %b"), alt.Tooltip("TRIPS:Q", format=",")])
-        .properties(height=280), width="stretch")
+# ======================= ABOUT =======================
+with tab_about:
+    st.markdown("### About the Models")
+    st.markdown("<div class='sub'>How the bike demand model was trained and how well it performs "
+                "on unseen test data.</div>", unsafe_allow_html=True)
+    st.write("")
 
-    wk = dow_hour.assign(Type=np.where(dow_hour["DOW"] >= 5, "Weekend", "Weekday"))
-    wk = wk.groupby(["Type", "HOUR"])["AVG"].mean().reset_index()
-    a2.markdown("**Average trips by hour: weekday vs weekend**")
-    a2.altair_chart(
-        alt.Chart(wk).mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=30))
-        .encode(x=alt.X("HOUR:Q", title="Hour", scale=alt.Scale(domain=[0, 23])),
-                y=alt.Y("AVG:Q", title="Average trips per hour"),
-                color=alt.Color("Type:N", title=None, legend=alt.Legend(orient="top"),
-                                scale=alt.Scale(domain=["Weekday", "Weekend"], range=[BLUE, ORANGE])),
-                tooltip=["Type", "HOUR", alt.Tooltip("AVG:Q", format=",.1f", title="Avg trips")])
-        .properties(height=280), width="stretch")
-
-    st.markdown("**When is demand highest? Average trips by day and hour** (darker = busier)")
-    st.altair_chart(
-        alt.Chart(dow_hour).mark_rect(stroke="white", strokeWidth=1)
-        .encode(x=alt.X("HOUR:O", title="Hour"),
-                y=alt.Y("Day:N", sort=DAYS, title=None),
-                color=alt.Color("AVG:Q", title="Avg trips", scale=alt.Scale(range=SEQ)),
-                tooltip=["Day", alt.Tooltip("HOUR:O", title="Hour"),
-                         alt.Tooltip("AVG:Q", format=",.1f", title="Avg trips")])
-        .properties(height=230), width="stretch")
-
-    if citywide:
-        b1, b2 = st.columns(2)
-        top_st = stations.nlargest(15, "TRIPS")
-        b1.markdown("**15 busiest stations (all January)**")
-        b1.altair_chart(
-            alt.Chart(top_st).mark_bar(color=BLUE, cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
-            .encode(y=alt.Y("NAME:N", sort="-x", title=None), x=alt.X("TRIPS:Q", title="Trips"),
-                    tooltip=["NAME", alt.Tooltip("TRIPS:Q", format=",")])
-            .properties(height=420), width="stretch")
-        mix = detail.groupby(["MEMBER", "BIKE"])["TRIPS"].sum().reset_index()
-        mix["BIKE"] = mix["BIKE"].str.replace("_", " ").str.capitalize()
-        b2.markdown("**Trips by rider type and bike type**")
-        b2.altair_chart(
-            alt.Chart(mix).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
-            .encode(x=alt.X("MEMBER:N", title=None, axis=alt.Axis(labelAngle=0)),
-                    xOffset="BIKE:N", y=alt.Y("TRIPS:Q", title="Trips"),
-                    color=alt.Color("BIKE:N", title=None, legend=alt.Legend(orient="top"),
-                                    scale=alt.Scale(range=[BLUE, ORANGE])),
-                    tooltip=["MEMBER", "BIKE", alt.Tooltip("TRIPS:Q", format=",")])
-            .properties(height=420), width="stretch")
-
-# ----------------------------------------------------------------------------
-# TAB 3: Next-hour forecast with the Assignment 5B model
-# ----------------------------------------------------------------------------
-with tab_next:
-    st.subheader("Next-hour citywide forecast (our Assignment 5B Extra Trees model)")
-    st.write("This model predicts **citywide** trips in the next hour from recent demand. "
-             "Pick an hour in January 2024: the inputs are filled from the real data, and you "
-             "can change them to see how the prediction responds.")
-    valid = city[city["split"] != "no lags"]
-    n1, n2 = st.columns(2)
-    nd_date = n1.date_input("Date (8–31 Jan 2024)", value=dt.date(2024, 1, 29),
-                            min_value=valid["hourly_timestamp"].min().date(),
-                            max_value=dt.date(2024, 1, 31), key="nd_date")
-    nd_hour = n2.selectbox("Hour", list(range(24)), index=8, format_func=fmt_hour, key="nd_hour")
-    ts = pd.Timestamp(nd_date) + pd.Timedelta(hours=nd_hour)
-    row = city[city["hourly_timestamp"] == ts].iloc[0]
-    key = ts.strftime("%Y%m%d%H")
-
-    st.markdown("**Model inputs** (edit any value for a what-if)")
-    i1, i2, i3, i4 = st.columns(4)
-    lag_1 = i1.number_input("Trips in the previous hour (lag_1)", 0, 50_000, int(row["lag_1"]), key=f"l1{key}")
-    lag_24 = i2.number_input("Same hour yesterday (lag_24)", 0, 50_000, int(row["lag_24"]), key=f"l24{key}")
-    lag_168 = i3.number_input("Same hour last week (lag_168)", 0, 50_000, int(row["lag_168"]), key=f"l168{key}")
-    roll = i4.number_input("Average of last 24 hours", 0.0, 50_000.0, float(round(row["rolling_mean_24"], 1)),
-                           key=f"r{key}")
-    x = pd.DataFrame([{"hour": nd_hour, "day_of_week": ts.dayofweek, "is_weekend": int(ts.dayofweek >= 5),
-                       "lag_1": lag_1, "lag_24": lag_24, "lag_168": lag_168, "rolling_mean_24": roll}])
-    pred = float(next_model.predict(x[meta["next_features"]])[0])
-    edited = (lag_1, lag_24, lag_168) != (int(row["lag_1"]), int(row["lag_24"]), int(row["lag_168"])) \
-        or abs(roll - round(row["rolling_mean_24"], 1)) > 1e-6
-
-    r1, r2, r3 = st.columns(3)
-    r1.metric(f"Predicted trips, {fmt_hour(nd_hour)}–{fmt_hour((nd_hour + 1) % 24)}", f"{pred:,.0f}")
-    r2.metric("Actual trips", f"{int(row['demand']):,}")
-    r3.metric("Error", "what-if" if edited else f"{pred - row['demand']:+,.0f}")
-    st.caption(("🟢 This hour is in the **test set**: the model never saw it during training."
-                if row["split"] == "test" else
-                "🟠 This hour was in the **training set**, so the prediction is optimistic. "
-                f"Test hours start {pd.Timestamp(meta['next_test_start']):%d %b %H:%M}.")
-               + (" Inputs edited: showing a what-if prediction." if edited else ""))
-
-    day_rows = city[(city["hourly_timestamp"].dt.date == nd_date) & (city["split"] != "no lags")]
-    day_rows = day_rows.assign(Predicted=next_model.predict(day_rows[meta["next_features"]]))
-    long = day_rows.melt(id_vars=["hour"], value_vars=["demand", "Predicted"],
-                         var_name="Series", value_name="Trips")
-    long["Series"] = long["Series"].replace({"demand": "Actual"})
-    st.markdown(f"**Actual vs predicted, {nd_date:%a %d %b %Y}**")
-    st.altair_chart(
-        alt.Chart(long).mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=30))
-        .encode(x=alt.X("hour:Q", title="Hour", scale=alt.Scale(domain=[0, 23])),
-                y=alt.Y("Trips:Q", title="Trips per hour"),
-                color=alt.Color("Series:N", title=None, legend=alt.Legend(orient="top"),
-                                scale=alt.Scale(domain=["Actual", "Predicted"], range=[GRAY, BLUE])),
-                tooltip=["Series", "hour", alt.Tooltip("Trips:Q", format=",.0f")])
-        .properties(height=300), width="stretch")
-
-# ----------------------------------------------------------------------------
-# TAB 4: Batch prediction
-# ----------------------------------------------------------------------------
-def predict_batch(b: pd.DataFrame) -> pd.DataFrame:
-    """Planning-model predictions for a table of DATE, HOUR, STATION_ID (or ALL)."""
-    b = b.copy()
-    b["STATION_ID"] = b["STATION_ID"].astype(str).str.strip()
-    b.loc[b["STATION_ID"].str.upper() == ALL, "STATION_ID"] = ALL
-    dates = pd.to_datetime(b["DATE"], errors="coerce")
-    hrs = pd.to_numeric(b["HOUR"], errors="coerce")
-    known = b["STATION_ID"].isin(set(stations["STATION_ID"]) | {ALL})
-    ok = dates.notna() & hrs.between(0, 23) & (hrs % 1 == 0) & known
-    b["PREDICTED_PICKUPS"] = np.nan
-    b["STATUS"] = np.where(~known, "Unknown station", np.where(ok, "OK", "Invalid date/hour"))
-    b["STATION_NAME"] = b["STATION_ID"].map(lambda s: loc_label(s) if s in NAME or s == ALL else "")
-    for d in dates[ok].dt.date.unique():
-        dp = predict_day(d.isoformat())
-        city_h = dp.groupby("HOUR")["PRED"].sum()
-        lookup = dp.set_index(["STATION_ID", "HOUR"])["PRED"]
-        m = ok & (dates.dt.date == d)
-        b.loc[m, "PREDICTED_PICKUPS"] = [
-            city_h[int(h)] if s == ALL else lookup[(s, int(h))]
-            for s, h in zip(b.loc[m, "STATION_ID"], hrs[m])]
-    b["PREDICTED_PICKUPS"] = b["PREDICTED_PICKUPS"].round(2)
-    return b
-
-
-with tab_batch:
-    st.subheader("Predict many date / hour / station combinations")
-    st.write("Upload a CSV with columns **DATE** (`YYYY-MM-DD`), **HOUR** (0–23) and "
-             "**STATION_ID** (from the station list below, or `ALL` for citywide). "
-             "Up to 20,000 rows and 60 different dates.")
-    busiest = stations.nlargest(3, "TRIPS")["STATION_ID"].tolist()
-    template = pd.DataFrame({"DATE": ["2024-01-17", "2024-01-17", "2024-01-20", "2025-01-15"],
-                             "HOUR": [8, 18, 14, 8],
-                             "STATION_ID": [busiest[0], busiest[1], busiest[2], ALL]})
-    cA, cB = st.columns(2)
-    cA.download_button("⬇️ Example CSV", template.to_csv(index=False), "example_bike_requests.csv", "text/csv")
-    cB.download_button("⬇️ Station list (IDs and names)",
-                       stations[["STATION_ID", "NAME", "LAT", "LNG", "TRIPS"]].to_csv(index=False),
-                       "citibike_stations.csv", "text/csv")
-    up = st.file_uploader("Upload your CSV", type="csv")
-    if up is not None:
-        try:
-            b = pd.read_csv(up, dtype=str)
-            b.columns = b.columns.str.strip().str.upper()
-            lacking = [c for c in ["DATE", "HOUR", "STATION_ID"] if c not in b.columns]
-            n_dates = pd.to_datetime(b.get("DATE"), errors="coerce").dt.date.nunique() if "DATE" in b else 0
-            if lacking:
-                st.error(f"Missing columns: {', '.join(lacking)}")
-            elif len(b) > 20_000 or n_dates > 60:
-                st.error("Please keep it to 20,000 rows and 60 different dates.")
-            else:
-                res = predict_batch(b)
-                st.success(f"Predicted {int((res['STATUS'] == 'OK').sum()):,} of {len(res):,} rows.")
-                st.dataframe(res, hide_index=True, width="stretch")
-                st.download_button("⬇️ Download predictions", res.to_csv(index=False),
-                                   "bike_demand_predictions.csv", "text/csv")
-        except Exception as ex:
-            st.error(f"Could not read this file: {ex}")
-
-# ----------------------------------------------------------------------------
-# TAB 5: About the models
-# ----------------------------------------------------------------------------
-with tab_model:
-    pm, nm = meta["plan_metrics"], meta["next_metrics"]
-    st.subheader("1. Planning model (Predict demand tab)")
-    st.markdown(f"""
-- **Question:** how many bikes will be picked up at a station in a given hour?
-- **Inputs:** station (target-encoded), station latitude/longitude, hour, day of week, weekend, U.S. holiday.
-  No past demand is needed, so it works for any date.
-- **Model:** histogram gradient boosting with a Poisson loss (suited to counts), scikit-learn.
-- **Test:** trained on 1–24 January, tested on {meta['plan_test_period']} (unseen week), then refit on all of January.
+    with st.container(border=True):
+        st.markdown("**Data and split**")
+        k = st.columns(4)
+        for col, (lab, val) in zip(k, [("Trips", f"{meta['n_trips']:,}"),
+                                       ("Stations", f"{meta['n_stations']:,}"),
+                                       ("Training set", meta["split"]["train"]),
+                                       ("Test set", meta["split"]["test"])]):
+            col.markdown(f"<div class='kpi'><div class='k'>{lab}</div><div class='v' "
+                         f"style='font-size:1.05rem'>{val}</div></div>", unsafe_allow_html=True)
+        st.write("")
+        st.markdown(f"""
+- **Bike demand (target):** number of trips starting at a station in one hour.
+- **Inputs:** station location (latitude/longitude), hour, day of week, weekend, U.S. holiday, plus
+  four **extracted features** describing the station's historical demand: its overall average,
+  its average at that hour, at that hour on weekdays vs weekends, and at that weekday and hour.
+  For testing, these averages use only the training days, so there is no leakage.
+- **Split:** chronological. Models learn from {meta['n_train_rows']:,} station-hours ({meta['split']['train']})
+  and are tested on {meta['n_test_rows']:,} station-hours ({meta['split']['test']}) they never saw.
 """)
-    q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Citywide R² (test week)", f"{pm['citywide_r2']:.3f}")
-    q2.metric("Citywide MAE", f"{pm['citywide_mae']:,.0f} trips/hour")
-    q3.metric("Station-hour MAE", f"{pm['station_hour_mae']:.2f} trips")
-    q4.metric("Station-hour RMSE", f"{pm['station_hour_rmse']:.2f} trips")
 
-    st.subheader("2. Next-hour model (Assignment 5B)")
-    st.markdown("Extra Trees on hour, day of week, weekend and recent demand "
-                "(lag_1, lag_24, lag_168, 24-hour rolling mean), chronological 80:20 split, as in 5B.")
-    w1, w2, w3 = st.columns(3)
-    w1.metric("R² (test)", f"{nm['r2']:.3f}")
-    w2.metric("MAE", f"{nm['mae']:,.1f} trips/hour")
-    w3.metric("RMSE", f"{nm['rmse']:,.1f} trips/hour")
-    imp = pd.DataFrame({"Feature": list(meta["next_importance"]),
-                        "Importance": list(meta["next_importance"].values())})
-    st.markdown("**Which inputs matter most to the next-hour model?**")
-    st.altair_chart(
-        alt.Chart(imp).mark_bar(color=BLUE, cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
-        .encode(y=alt.Y("Feature:N", sort="-x", title=None),
-                x=alt.X("Importance:Q", axis=alt.Axis(format="%")),
-                tooltip=["Feature", alt.Tooltip("Importance:Q", format=".1%")])
-        .properties(height=230), width="stretch")
+    res = pd.DataFrame(meta["models"])
+    best = meta["best_model"]
+    with st.container(border=True):
+        st.markdown("**Model performance on the test set**")
+        show = res[["model", "mae", "rmse", "r2"]].rename(
+            columns={"model": "Model", "mae": "MAE", "rmse": "RMSE", "r2": "R²"})
+        show["Model"] = [m + "  ✓ best" if m == best else m for m in show["Model"]]
+        st.dataframe(show.style.format({"MAE": "{:.3f}", "RMSE": "{:.3f}", "R²": "{:.3f}"})
+                     .apply(lambda r: ["font-weight:700; background:#eef5fd"
+                                       if r["Model"].endswith("best") else "" for _ in r], axis=1),
+                     hide_index=True, width="stretch")
+        st.caption("MAE and RMSE: average error in trips per station-hour (lower is better). "
+                   "R²: share of the variation in bike demand explained (higher is better).")
+        res["Best"] = res["model"] == best
+        st.altair_chart(alt.Chart(res).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
+            y=alt.Y("model:N", sort="-x", title=None, axis=alt.Axis(labelLimit=240)),
+            x=alt.X("r2:Q", title="R² on test set (higher is better)", scale=alt.Scale(domain=[0, 1])),
+            color=alt.condition("datum.Best", alt.value(BLUE), alt.value("#c9c9c9")),
+            tooltip=[alt.Tooltip("model:N", title="Model"), alt.Tooltip("mae:Q", format=".3f", title="MAE"),
+                     alt.Tooltip("rmse:Q", format=".3f", title="RMSE"),
+                     alt.Tooltip("r2:Q", format=".3f", title="R²")]).properties(height=150),
+            width="stretch")
 
-    st.markdown("**Assignment 5B comparison (default models, citywide hourly demand)**")
-    prev = pd.DataFrame([{"Model": k, "MAE": v["mae"], "RMSE": v["rmse"], "R²": v["r2"]}
-                         for k, v in meta["previous_5b"].items()])
-    st.dataframe(prev.style.format({"MAE": "{:.1f}", "RMSE": "{:.1f}", "R²": "{:.3f}"}),
-                 hide_index=True)
+    b = res[res["model"] == best].iloc[0]
+    with st.container(border=True):
+        st.markdown(f"**✅ Selected model: {best}**")
+        st.markdown(f"""
+Lowest test error (RMSE {b['rmse']:.3f}, MAE {b['mae']:.3f}) with R² {b['r2']:.3f}.
+After testing, it was retrained on all of January and is the model used on the **Predict Demand** tab.
 
-    st.markdown("""
 **Limitations**
-- **No weather:** temperature, rain and snow strongly affect cycling but are not in the trip data.
-- **January only:** the models learned winter behaviour; other months are shown at winter level.
-- Demand = trips *starting* at a station (pickups). Station capacity and bike availability are not modelled.
-- Stations with fewer than 20 trips in January are excluded as too noisy.
+- No weather data in the Citi Bike trips, so weather is not an input.
+- Trained on January 2024 only; other months are predicted at January (winter) levels.
+- Bike demand means trips starting at a station; how many bikes are parked at a station is not modelled.
 """)
-
-# ----------------------------------------------------------------------------
-# TAB 6: Help
-# ----------------------------------------------------------------------------
-with tab_help:
-    st.markdown("""
-### Quick start
-1. Open **🔮 Predict demand**.
-2. Pick a **date**, an **hour** and a **location**: one station (type to search) or *All NYC*.
-3. Read the predicted pickups for that hour and the whole day; compare with the typical January value.
-4. The line chart shows the whole day; the map shows every station at your hour (hover a circle).
-
-### Other tabs
-- **📊 Explore patterns:** actual January 2024 demand by day, hour, weekday/weekend, rider and bike type.
-- **⏱️ Next-hour forecast:** our Assignment 5B model. Pick an hour, then edit the inputs for a what-if.
-- **📁 Batch prediction:** download the example CSV, fill in rows, upload, download predictions.
-- **🧠 About the models:** accuracy, feature importance and limitations.
-
-### Things to try
-- *All NYC*, a Wednesday at 08:00 vs a Saturday at 08:00: commuting vs leisure.
-- 15 January 2024 (Martin Luther King Jr. Day) vs 16 January at 08:00.
-- In the next-hour tab, halve "Trips in the previous hour" and watch the forecast drop.
-""")
-
-st.caption("Chamak Saha · Data: Citi Bike System Data (citibikenyc.com/system-data) · "
-           "For informational purposes only.")
+    if meta.get("importance"):
+        NICE = {"LAT": "Latitude", "LNG": "Longitude", "HOUR": "Hour", "DOW": "Day of week",
+                "IS_WEEKEND": "Weekend", "IS_HOLIDAY": "Holiday",
+                "ST_MEAN": "Station average", "ST_HOUR_MEAN": "Station average at hour",
+                "ST_DAYTYPE_HOUR_MEAN": "Station avg, weekday/weekend × hour",
+                "ST_DOW_HOUR_MEAN": "Station avg, weekday × hour"}
+        imp = pd.DataFrame({"Feature": [NICE.get(k, k) for k in meta["importance"]],
+                            "Importance": list(meta["importance"].values())})
+        with st.container(border=True):
+            st.markdown(f"**Which features matter most? ({best})**")
+            st.caption("Drop in test R² when a feature is shuffled (permutation importance).")
+            st.altair_chart(alt.Chart(imp).mark_bar(color=BLUE, cornerRadiusTopRight=3,
+                                                    cornerRadiusBottomRight=3).encode(
+                y=alt.Y("Feature:N", sort="-x", title=None, axis=alt.Axis(labelLimit=260)),
+                x=alt.X("Importance:Q", title="Drop in R²"),
+                tooltip=["Feature", alt.Tooltip("Importance:Q", format=".4f")])
+                .properties(height=280), width="stretch")
+    st.caption("Data: Citi Bike System Data, January 2024 · Built by Chamak Saha")
