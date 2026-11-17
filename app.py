@@ -227,6 +227,7 @@ with tab_pred:
 with tab_exp:
     st.markdown("### Explore Demand Patterns")
     st.markdown("<div class='sub'>Actual Citi Bike trips, January 1–14, 2024.</div>", unsafe_allow_html=True)
+    st.caption("Tip: Rider type and bike type filters work only when Station is set to All NYC stations.")
     st.write("")
     f1, f2 = st.columns(2)
     e_loc = f1.selectbox("Station", [ALL] + STATION_OPTS, key="e_loc",
