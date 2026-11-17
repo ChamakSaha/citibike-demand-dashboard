@@ -196,7 +196,7 @@ with tab_pred:
         st.divider()
         st.markdown("### Hourly Demand Trend")
         st.markdown(f"<div class='sub'>Predicted trips for every hour of {date:%A, %d %b %Y} at "
-                    f"{NAME[sid]}, compared with the January average for {DAYS[date.weekday()]}s.</div>",
+                    f"{NAME[sid]}, compared with the January 2024 average for {DAYS[date.weekday()]}s.</div>",
                     unsafe_allow_html=True)
         dom = ["Predicted", f"January average ({DAYS[date.weekday()]})"]
         df = pd.DataFrame({"Hour": list(range(24)) * 2,
@@ -226,7 +226,7 @@ with tab_pred:
 # ======================= EXPLORE =======================
 with tab_exp:
     st.markdown("### Explore Demand Patterns")
-    st.markdown("<div class='sub'>Actual Citi Bike trips in January 2024.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub'>Actual Citi Bike trips, January 1–14, 2024.</div>", unsafe_allow_html=True)
     st.write("")
     f1, f2 = st.columns(2)
     e_loc = f1.selectbox("Station", [ALL] + STATION_OPTS, key="e_loc",
@@ -285,7 +285,7 @@ with tab_exp:
             tooltip=["Type", "HOUR", alt.Tooltip("AVG:Q", format=",.1f")]).properties(height=240),
             width="stretch")
     with st.container(border=True):
-        st.markdown("**Trips per day in January**")
+        st.markdown("**Trips per day, January 1–14, 2024**")
         st.altair_chart(alt.Chart(daily).mark_bar(color=BLUE, cornerRadiusTopLeft=3,
                                                   cornerRadiusTopRight=3).encode(
             x=alt.X("DATE:T", title=None, axis=alt.Axis(format="%d %b")),
@@ -293,7 +293,7 @@ with tab_exp:
             tooltip=[alt.Tooltip("DATE:T", format="%a %d %b"), alt.Tooltip("TRIPS:Q", format=",")])
             .properties(height=220), width="stretch")
     with st.container(border=True):
-        st.markdown("**When is demand highest?** (darker = busier)")
+        st.markdown("**When is demand highest,January 1–14, 2024?** (darker = busier)")
         st.altair_chart(alt.Chart(dh).mark_rect(stroke="white", strokeWidth=1, cornerRadius=2).encode(
             x=alt.X("HOUR:O", title="Hour", axis=alt.Axis(labelAngle=0)),
             y=alt.Y("Day:N", sort=[d[:3] for d in DAYS], title=None),
@@ -302,7 +302,7 @@ with tab_exp:
             width="stretch")
     if citywide:
         with st.container(border=True):
-            st.markdown("**10 busiest stations**")
+            st.markdown("**10 busiest stations,January 1–14, 2024**")
             st.altair_chart(alt.Chart(stations.nlargest(10, "TRIPS")).mark_bar(
                 color=BLUE, cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
                 y=alt.Y("NAME:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
