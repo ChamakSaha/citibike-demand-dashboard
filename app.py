@@ -275,7 +275,7 @@ with tab_exp:
     st.write("")
 
     with st.container(border=True):
-        st.markdown("**Average trips per hour**")
+        st.markdown("**Average trips per hour, January 1–14, 2024**")
         wk = dh.assign(Type=np.where(dh["DOW"] >= 5, "Weekend", "Weekday")).groupby(
             ["Type", "HOUR"], as_index=False)["AVG"].mean()
         st.altair_chart(alt.Chart(wk).mark_line(strokeWidth=2.5).encode(
@@ -303,7 +303,7 @@ with tab_exp:
             width="stretch")
     if citywide:
         with st.container(border=True):
-            st.markdown("**10 busiest stations,January 1–14, 2024**")
+            st.markdown("**10 busiest stations, January 1–14, 2024**")
             st.altair_chart(alt.Chart(stations.nlargest(10, "TRIPS")).mark_bar(
                 color=BLUE, cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
                 y=alt.Y("NAME:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
